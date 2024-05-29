@@ -1,31 +1,49 @@
 import fs from 'fs/promises';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { Kafka } from 'kafkajs';
 
-// Create a new PDFDocument
-const pdfDoc = await PDFDocument.create()
+// Initialize Kafka producer
+const kafka = new Kafka({
+  clientId: 'pdf-creator',
+  brokers: ['localhost:9092'], // Update with your Kafka broker address
+});
 
-// Embed the Times Roman font
-const timesRomanFont = await pdfDoc.embedFont(StandardFonts.TimesRoman)
+const producer = kafka.producer();
 
-// Add a blank page to the document
-const page = pdfDoc.addPage()
+async function createPDFAndSendMessage() {
+  try {
+    const pdfDoc = await PDFDocument.create();
+    const timesRomanFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    const page = pdfDoc.addPage();
+    const { width, height } = page.getSize();
+    const fontSize = 30;
+    page.drawText('Creating PDFs in JavaScript is awesome!', {
+      x: 50,
+      y: height - 4 * fontSize,
+      size: fontSize,
+      font: timesRomanFont,
+      color: rgb(0, 0.53, 0.71),
+    });
+    const pdfBytes = await pdfDoc.save();
+    await fs.writeFile('output.pdf', pdfBytes);
 
-// Get the width and height of the page
-const { width, height } = page.getSize()
 
-// Draw a string of text toward the top of the page
-const fontSize = 30
-page.drawText('Creating PDFs in JavaScript is awesome!', {
-  x: 50,
-  y: height - 4 * fontSize,
-  size: fontSize,
-  font: timesRomanFont,
-  color: rgb(0, 0.53, 0.71),
-})
 
-// Serialize the PDFDocument to bytes (a Uint8Array)
-const pdfBytes = await pdfDoc.save()
+    await producer.connect();
+    
+    // Send a message to Kafka
+    await producer.send({
+      topic: 'pdf-creation-events', // Update with your Kafka topic
+      messages: [{ value: 'A new PDF has been created.' }],
+    });
 
-await fs.writeFile('output.pdf', pdfBytes);
+    console.log('PDF saved successfully.');
+  } catch (error) {
+    console.error('Error:', error);
+  } finally {
+    await producer.disconnect();
+  }
+}
 
-console.log('PDF saved successfully.');
+// Call the function to create the PDF and send the message
+createPDFAndSendMessage();
